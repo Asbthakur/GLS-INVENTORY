@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GLS Inventory Dashboard</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --primary: #1a5276;
+            --primary-light: #2980b9;
+            --success: #27ae60;
+            --warning: #f39c12;
+            --danger: #e74c3c;
+            --bg: #f5f7fa;
+            --card-bg: #ffffff;
+            --text: #2c3e50;
+            --text-light: #7f8c8d;
+            --border: #e1e8ed;
+            --shadow: 0 2px 8px rgba(0,0,0,0.08);
+            --radius: 10px;
+        }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); color: var(--text); line-height: 1.4; }
+
+        /* HEADER */
+        .header { background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%); color: white; padding: 14px 30px; display: flex; justify-content: space-between; align-items: center; box-shadow: 0 3px 12px rgba(0,0,0,0.15); position: sticky; top: 0; z-index: 100; }
+        .header h1 { font-size: 22px; font-weight: 700; }
+        .header h1 span { font-weight: 300; opacity: 0.85; }
+        .header-right { display: flex; align-items: center; gap: 12px; font-size: 13px; opacity: 0.9; }
+        .refresh-btn { background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.3); color: white; padding: 5px 14px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+        .refresh-btn:hover { background: rgba(255,255,255,0.35); }
+
+        /* TAB NAVIGATION */
+        .tab-nav { display: flex; gap: 0; background: var(--card-bg); border-radius: var(--radius) var(--radius) 0 0; box-shadow: var(--shadow); margin-bottom: 0; overflow: hidden; }
+        .tab-btn { flex: 1; padding: 12px 20px; border: none; background: #eef2f7; font-size: 14px; font-weight: 600; cursor: pointer; color: var(--text-light); transition: all 0.2s; text-align: center; border-bottom: 3px solid transparent; }
+        .tab-btn.active { background: var(--card-bg); color: var(--primary); border-bottom-color: var(--primary); }
+        .tab-btn:hover:not(.active) { background: #e5eaf0; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        .container { max-width: 1400px; margin: 0 auto; padding: 16px; }
+
+        /* SUMMARY CARDS */
+        .summary-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 14px; }
+        .card { background: var(--card-bg); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow); border-left: 4px solid var(--primary); }
+        .card.green { border-left-color: var(--success); }
+        .card.yellow { border-left-color: var(--warning); }
+        .card.red { border-left-color: var(--danger); }
+        .card.purple { border-left-color: #8e44ad; }
+        .card-label { font-size: 11px; color: var(--text-light); text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+        .card-value { font-size: 26px; font-weight: 700; }
+        .card-sub { font-size: 11px; color: var(--text-light); margin-top: 2px; }
+
+        /* CONTROLS */
+        .controls { background: var(--card-bg); border-radius: var(--radius); padding: 12px 16px; box-shadow: var(--shadow); margin-bottom: 14px; display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+        .search-box { flex: 1; min-width: 200px; position: relative; }
+        .search-box input { width: 100%; padding: 8px 12px 8px 34px; border: 2px solid var(--border); border-radius: 8px; font-size: 15px; outline: none; }
+        .search-box input:focus { border-color: var(--primary-light); }
+        .search-box::before { content: '\1F50D'; position: absolute; left: 10px; top: 50%; transform: translateY(-50%); font-size: 14px; }
+        .filter-select { padding: 8px 12px; border: 2px solid var(--border); border-radius: 8px; font-size: 15px; background: white; outline: none; cursor: pointer; min-width: 150px; }
+        .stock-toggle { display: flex; border: 2px solid var(--border); border-radius: 8px; overflow: hidden; }
+        .stock-toggle button { padding: 7px 14px; border: none; background: white; font-size: 14px; cursor: pointer; font-weight: 500; }
+        .stock-toggle button.active { background: var(--primary); color: white; }
+
+        /* TABLE */
+        .table-container { background: var(--card-bg); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; }
+        .table-scroll { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; }
+        thead th { background: var(--primary); color: white; padding: 10px 12px; text-align: left; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; cursor: pointer; user-select: none; white-space: nowrap; position: sticky; top: 0; }
+        thead th:hover { background: var(--primary-light); }
+        thead th .sort-arrow { margin-left: 4px; font-size: 10px; }
+
+        /* PRODUCT ROWS - compact */
+        .product-row { cursor: pointer; transition: background 0.12s; }
+        .product-row:hover { background: #f0f6ff; }
+        .product-row td { padding: 7px 12px; border-bottom: 1px solid var(--border); font-size: 15px; }
+        .product-row td:first-child { font-weight: 600; }
+        .product-row .chevron { display: inline-block; transition: transform 0.2s; margin-right: 6px; font-size: 11px; color: var(--text-light); }
+        .product-row.expanded .chevron { transform: rotate(90deg); }
+        .product-row:nth-child(4n+1) { background: #fafcff; }
+        .product-row:nth-child(4n+1):hover { background: #f0f6ff; }
+
+        /* BATCH ROWS */
+        .batch-row { display: none; }
+        .batch-row.visible { display: table-row; }
+        .batch-row td { padding: 0; border-bottom: 2px solid var(--primary-light); }
+        .batch-table-wrap { background: #f8fafe; padding: 8px 16px 8px 32px; }
+        .batch-table { width: 100%; border-collapse: collapse; }
+        .batch-table th { padding: 6px 10px; text-align: left; font-size: 12px; font-weight: 600; color: var(--text-light); text-transform: uppercase; border-bottom: 2px solid var(--border); background: transparent; cursor: default; position: static; }
+        .batch-table td { padding: 5px 10px; font-size: 14px; border-bottom: 1px solid #eef2f7; }
+
+        /* BADGES */
+        .expiry-badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 13px; font-weight: 600; }
+        .expiry-expired { background: #fde8e8; color: #c0392b; }
+        .expiry-soon { background: #fef3e2; color: #d68910; }
+        .expiry-ok { background: #e8f8f0; color: #1e8449; }
+        .expiry-unknown { background: #eee; color: #888; }
+        .stock-zero { color: #bbb; }
+        .stock-low { color: var(--warning); font-weight: 600; }
+        .stock-good { color: var(--success); font-weight: 600; }
+        .company-tag { display: inline-block; background: #eef2f7; padding: 1px 7px; border-radius: 4px; font-size: 12px; color: var(--text-light); max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .sales-person-tag { display: inline-block; background: #e8f0fe; color: #1a56db; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; }
+
+        /* SALE MODAL */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 1000; justify-content: center; align-items: center; }
+        .modal-overlay.active { display: flex; }
+        .modal { background: white; border-radius: 14px; width: 90%; max-width: 480px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); animation: modalIn 0.25s ease-out; overflow: hidden; }
+        @keyframes modalIn { from { transform: translateY(30px) scale(0.95); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
+        .modal-header { background: linear-gradient(135deg, var(--primary) 0%, var(--primary-light) 100%); color: white; padding: 16px 24px; }
+        .modal-header h2 { font-size: 18px; font-weight: 600; }
+        .modal-header .modal-sub { font-size: 12px; opacity: 0.85; margin-top: 3px; }
+        .modal-body { padding: 20px 24px; }
+        .form-group { margin-bottom: 14px; }
+        .form-group label { display: block; font-size: 12px; font-weight: 600; color: var(--text-light); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
+        .form-group input, .form-group select { width: 100%; padding: 9px 14px; border: 2px solid var(--border); border-radius: 8px; font-size: 15px; outline: none; }
+        .form-group input:focus, .form-group select:focus { border-color: var(--primary-light); }
+        .form-row { display: flex; gap: 12px; }
+        .form-row .form-group { flex: 1; }
+        .form-info { background: #f0f6ff; border-radius: 8px; padding: 8px 12px; font-size: 13px; color: var(--text); margin-bottom: 14px; }
+        .form-info strong { color: var(--primary); }
+        .modal-actions { display: flex; gap: 10px; padding: 0 24px 20px; }
+        .btn-submit { flex: 1; padding: 11px; background: var(--success); color: white; border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; }
+        .btn-submit:hover { background: #219a52; }
+        .btn-submit:disabled { background: #ccc; cursor: not-allowed; }
+        .btn-cancel { padding: 11px 20px; background: #eee; color: var(--text); border: none; border-radius: 8px; font-size: 14px; cursor: pointer; }
+        .btn-sale { padding: 3px 10px; background: var(--primary-light); color: white; border: none; border-radius: 5px; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+        .btn-sale:hover { background: var(--primary); }
+
+        /* TOAST */
+        .toast { position: fixed; bottom: 30px; right: 30px; padding: 12px 22px; border-radius: 10px; color: white; font-size: 14px; font-weight: 500; box-shadow: 0 6px 20px rgba(0,0,0,0.2); z-index: 2000; animation: toastIn 0.3s ease-out; max-width: 400px; }
+        .toast.success { background: var(--success); }
+        .toast.error { background: var(--danger); }
+        @keyframes toastIn { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+        /* SALES REPORT */
+        .report-container { background: var(--card-bg); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; margin-top: 14px; }
+        .report-table { width: 100%; border-collapse: collapse; }
+        .report-table th { background: #8e44ad; color: white; padding: 10px 14px; text-align: left; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+        .report-table td { padding: 8px 14px; border-bottom: 1px solid var(--border); font-size: 15px; }
+        .report-table tr:hover { background: #faf5ff; }
+        .report-table .rank { font-weight: 700; color: #8e44ad; font-size: 16px; }
+        .report-bar { height: 6px; background: #e8e0f0; border-radius: 3px; overflow: hidden; margin-top: 3px; }
+        .report-bar-fill { height: 100%; background: linear-gradient(90deg, #8e44ad, #a569bd); border-radius: 3px; }
+        .report-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 14px; }
+        .no-sales { text-align: center; padding: 40px; color: var(--text-light); font-size: 16px; }
+
+        /* MISC */
+        .loading { text-align: center; padding: 50px 20px; }
+        .loading .spinner { width: 36px; height: 36px; border: 4px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 12px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .error-box { background: #fde8e8; border: 1px solid #f5c6cb; color: #721c24; padding: 14px 18px; border-radius: 8px; margin: 20px 0; }
+        .error-box button { margin-top: 8px; padding: 7px 16px; background: var(--danger); color: white; border: none; border-radius: 6px; cursor: pointer; }
+        .footer { text-align: center; padding: 16px; font-size: 12px; color: var(--text-light); }
+        .no-results { text-align: center; padding: 30px; color: var(--text-light); font-size: 15px; }
+        .result-count { padding: 8px 16px; font-size: 13px; color: var(--text-light); border-bottom: 1px solid var(--border); }
+
+        @media (max-width: 768px) {
+            .header { padding: 12px 14px; } .header h1 { font-size: 18px; }
+            .container { padding: 10px; } .controls { padding: 10px; }
+            .search-box { min-width: 100%; } .filter-select { min-width: 100%; }
+            .summary-cards { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+            .product-row td { padding: 6px 8px; font-size: 14px; }
+            .batch-table-wrap { padding: 6px 8px 6px 16px; }
+            .tab-btn { font-size: 13px; padding: 10px 8px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>GLS <span>Inventory Dashboard</span></h1>
+        <div class="header-right">
+            <span class="last-updated" id="lastUpdated">Loading...</span>
+            <button class="refresh-btn" onclick="loadData()">Refresh</button>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- TAB NAVIGATION -->
+        <div class="tab-nav">
+            <button class="tab-btn active" onclick="switchTab('inventory')">Inventory</button>
+            <button class="tab-btn" onclick="switchTab('salesreport')">Sales Report</button>
+        </div>
+
+        <!-- ==================== INVENTORY TAB ==================== -->
+        <div class="tab-content active" id="tab-inventory">
+            <div class="summary-cards" id="summaryCards" style="margin-top:14px;">
+                <div class="card"><div class="card-label">Total Products</div><div class="card-value" id="totalProducts">-</div><div class="card-sub" id="totalProductsSub"></div></div>
+                <div class="card green"><div class="card-label">In Stock</div><div class="card-value" id="inStock">-</div><div class="card-sub" id="inStockSub"></div></div>
+                <div class="card red"><div class="card-label">Expired</div><div class="card-value" id="expiredCount">-</div><div class="card-sub">with stock &gt; 0</div></div>
+                <div class="card yellow"><div class="card-label">Expiring Soon</div><div class="card-value" id="expiringSoon">-</div><div class="card-sub">within 90 days</div></div>
+            </div>
+            <div class="controls">
+                <div class="search-box"><input type="text" id="searchInput" placeholder="Search product name..."></div>
+                <select class="filter-select" id="companyFilter"><option value="">All Companies</option></select>
+                <select class="filter-select" id="salesPersonFilter"><option value="">All Sales Persons</option></select>
+                <div class="stock-toggle">
+                    <button id="btnInStock" class="active" onclick="setStockFilter(true)">In Stock</button>
+                    <button id="btnAll" onclick="setStockFilter(false)">All</button>
+                </div>
+            </div>
+            <div class="table-container">
+                <div class="result-count" id="resultCount"></div>
+                <div class="table-scroll">
+                    <table>
+                        <thead><tr>
+                            <th onclick="sortBy('name')" style="min-width:260px">Product Name <span class="sort-arrow" id="sort-name"></span></th>
+                            <th onclick="sortBy('company')" style="min-width:140px">Company <span class="sort-arrow" id="sort-company"></span></th>
+                            <th onclick="sortBy('cost')" style="min-width:110px">Landing Cost <span class="sort-arrow" id="sort-cost"></span></th>
+                            <th onclick="sortBy('stock')" style="min-width:100px">Total Stock <span class="sort-arrow" id="sort-stock"></span></th>
+                            <th onclick="sortBy('expiry')" style="min-width:120px">Earliest Expiry <span class="sort-arrow" id="sort-expiry"></span></th>
+                        </tr></thead>
+                        <tbody id="tableBody"><tr><td colspan="5"><div class="loading"><div class="spinner"></div><div>Loading inventory...</div></div></td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- ==================== SALES REPORT TAB ==================== -->
+        <div class="tab-content" id="tab-salesreport">
+            <div class="report-summary" id="reportSummaryCards" style="margin-top:14px;"></div>
+            <div class="report-container">
+                <div class="table-scroll">
+                    <table class="report-table" id="reportTable">
+                        <thead><tr>
+                            <th>#</th>
+                            <th>Sales Person</th>
+                            <th>Items Sold</th>
+                            <th>Total Qty</th>
+                            <th>Total Revenue</th>
+                            <th>Avg. Rate/Unit</th>
+                            <th>Performance</th>
+                        </tr></thead>
+                        <tbody id="reportBody"><tr><td colspan="7" class="no-sales">No sales data yet. Record sales from the Inventory tab.</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+            <!-- Detailed sales breakdown per person -->
+            <div id="salesDetailSection" style="margin-top:14px;"></div>
+        </div>
+
+        <div class="footer">GLS Inventory Dashboard &bull; Data from Google Sheets</div>
+    </div>
+
+    <!-- RECORD SALE MODAL -->
+    <div class="modal-overlay" id="saleModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h2>Record Sale</h2>
+                <div class="modal-sub" id="modalProductInfo"></div>
+            </div>
+            <div class="modal-body">
+                <div class="form-info" id="modalBatchInfo"></div>
+                <div class="form-group">
+                    <label>Sales Person</label>
+                    <select id="salePerson"><option value="">-- Select Your Name --</option></select>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Sale Quantity</label>
+                        <input type="number" id="saleQtyInput" min="1" placeholder="Qty sold">
+                    </div>
+                    <div class="form-group">
+                        <label>Net Sale Rate (per unit)</label>
+                        <input type="number" id="saleRateInput" min="0" step="0.01" placeholder="Rate per unit">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-actions">
+                <button class="btn-cancel" onclick="closeSaleModal()">Cancel</button>
+                <button class="btn-submit" id="btnSubmitSale" onclick="submitSale()">Submit Sale</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    // ====================================================================
+    //  CONFIGURATION
+    // ====================================================================
+    const SHEET_CSV_URL = 'PASTE_YOUR_PUBLISHED_CSV_URL_HERE';
+    const APPS_SCRIPT_URL = 'PASTE_YOUR_APPS_SCRIPT_URL_HERE';
+    const EXPIRY_WARNING_DAYS = 90;
+    const CACHE_KEY = 'gls_inventory_cache';
+    const SALES_TEAM = ['SURAJ','ROHAN','GAURI','DIPALI','NISHA','ASHWINI','ARVIND','SUMANTH','PANKAJ','PAWAN'];
+
+    // ====================================================================
+    //  STATE
+    // ====================================================================
+    let allProducts = [];
+    let filteredProducts = [];
+    let currentSort = { field: 'name', asc: true };
+    let showOnlyInStock = true;
+    let expandedProduct = null;
+    let searchTimeout = null;
+    let saleDataStore = {};
+    let currentSaleData = null;
+    const LOCAL_SALES_KEY = 'gls_local_sales'; // localStorage key for local sale records
+
+    // ====================================================================
+    //  LOCAL SALES STORAGE (works offline / without Google Sheets)
+    // ====================================================================
+    function getLocalSales() {
+        try { return JSON.parse(localStorage.getItem(LOCAL_SALES_KEY) || '[]'); } catch(e) { return []; }
+    }
+    function saveLocalSale(itemName, batchNo, salesPerson, saleQty, saleRate) {
+        const sales = getLocalSales();
+        sales.push({ itemName, batchNo, salesPerson, saleQty, saleRate, timestamp: new Date().toISOString() });
+        localStorage.setItem(LOCAL_SALES_KEY, JSON.stringify(sales));
+    }
+    function mergeLocalSalesIntoRows(rawRows) {
+        const sales = getLocalSales();
+        if (!sales.length) return rawRows;
+        // Build a map of cumulative local sales per item+batch
+        const saleMap = {};
+        sales.forEach(s => {
+            const key = (s.itemName||'').trim() + '|||' + (s.batchNo||'').trim();
+            if (!saleMap[key]) saleMap[key] = { persons: [], totalQty: 0, totalValue: 0 };
+            saleMap[key].totalQty += s.saleQty;
+            saleMap[key].totalValue += s.saleQty * s.saleRate;
+            if (s.salesPerson && !saleMap[key].persons.includes(s.salesPerson.toUpperCase())) {
+                saleMap[key].persons.push(s.salesPerson.toUpperCase());
+            }
+        });
+        // Merge into raw rows
+        return rawRows.map(row => {
+            const key = (row['Item Name']||'').trim() + '|||' + (row['Batch No']||'').trim();
+            if (saleMap[key]) {
+                const m = saleMap[key];
+                const existingQty = parseInt(row['Sale Qty']) || 0;
+                const existingRate = parseFloat(row['Sale Rate']) || 0;
+                const existingSP = (row['Sales Person'] || '').trim();
+                const newTotalQty = existingQty + m.totalQty;
+                // Weighted average rate
+                const newRate = newTotalQty > 0 ? ((existingQty * existingRate) + m.totalValue) / newTotalQty : 0;
+                // Merge sales person names
+                let allPersons = existingSP ? [existingSP.toUpperCase()] : [];
+                m.persons.forEach(p => { if (!allPersons.includes(p)) allPersons.push(p); });
+                row = Object.assign({}, row);
+                row['Sale Qty'] = String(newTotalQty);
+                row['Sale Rate'] = String(Math.round(newRate * 100) / 100);
+                row['Sales Person'] = allPersons.join(', ');
+            }
+            return row;
+        });
+    }
+
+    // ====================================================================
+    //  TAB SWITCHING
+    // ====================================================================
+    function switchTab(tab) {
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        document.getElementById('tab-' + tab).classList.add('active');
+        event.target.classList.add('active');
+        if (tab === 'salesreport') renderSalesReport();
+    }
+
+    // ====================================================================
+    //  DATA LOADING
+    // ====================================================================
+    async function loadData() {
+        const tbody = document.getElementById('tableBody');
+        tbody.innerHTML = '<tr><td colspan="5"><div class="loading"><div class="spinner"></div><div>Loading...</div></div></td></tr>';
+        try {
+            let csvText;
+            if (SHEET_CSV_URL && !SHEET_CSV_URL.includes('PASTE_YOUR')) {
+                const r = await fetch(SHEET_CSV_URL); if (!r.ok) throw new Error('HTTP ' + r.status);
+                csvText = await r.text();
+                try { localStorage.setItem(CACHE_KEY, csvText); } catch(e) {}
+            } else {
+                try { const r = await fetch('GLS_INVENTORY_CLEAN.csv'); if (r.ok) csvText = await r.text(); } catch(e) {}
+                if (!csvText) { csvText = localStorage.getItem(CACHE_KEY); }
+                if (!csvText) { showError('Set SHEET_CSV_URL in index.html'); return; }
+            }
+            const parsed = Papa.parse(csvText, { header: true, skipEmptyLines: true, dynamicTyping: false, transformHeader: h => h.trim() });
+            if (!parsed.data || !parsed.data.length) { showError('No data found.'); return; }
+            processData(parsed.data);
+            document.getElementById('lastUpdated').textContent = 'Updated: ' + new Date().toLocaleTimeString();
+        } catch(err) {
+            const cached = localStorage.getItem(CACHE_KEY);
+            if (cached) { const p = Papa.parse(cached, { header: true, skipEmptyLines: true, transformHeader: h => h.trim() }); processData(p.data); document.getElementById('lastUpdated').textContent = 'Cached (offline)'; }
+            else showError('Load failed: ' + err.message);
+        }
+    }
+    function showError(msg) { document.getElementById('tableBody').innerHTML = '<tr><td colspan="5"><div class="error-box">' + msg + '<br><button onclick="loadData()">Retry</button></div></td></tr>'; }
+
+    // ====================================================================
+    //  DATA PROCESSING
+    // ====================================================================
+    function processData(rawRows) {
+        // Merge any locally recorded sales into the CSV data
+        rawRows = mergeLocalSalesIntoRows(rawRows);
+        const productMap = new Map();
+        for (const row of rawRows) {
+            const name = (row['Item Name'] || '').trim(); if (!name) continue;
+            const stock = parseInt(row['Current Stock']) || 0;
+            const cost = parseFloat(row['Landing Cost']) || 0;
+            const mrp = parseFloat(row['MRP']) || 0;
+            const expiry = (row['Expiry Date'] || '').trim();
+            const batch = (row['Batch No'] || '').trim();
+            const company = (row['COMPANY'] || row['Company Name'] || '').trim();
+            const kind = (row['KIND OF MEDICINE'] || '').trim();
+            const salesPerson = (row['Sales Person'] || '').trim();
+            const saleQty = parseInt(row['Sale Qty']) || 0;
+            const saleRate = parseFloat(row['Sale Rate']) || 0;
+
+            if (!productMap.has(name)) {
+                productMap.set(name, { name, kind, company, totalStock: 0, totalSaleQty: 0, totalSaleValue: 0, batches: [], weightedCostSum: 0, weightedCostQty: 0, allCosts: [], earliestExpiry: null, hasExpired: false, hasExpiringSoon: false });
+            }
+            const p = productMap.get(name);
+            p.totalStock += stock;
+            p.totalSaleQty += saleQty;
+            p.totalSaleValue += saleQty * saleRate;
+            if (cost > 0) { p.allCosts.push(cost); if (stock > 0) { p.weightedCostSum += cost * stock; p.weightedCostQty += stock; } }
+            p.batches.push({ batchNo: batch, quantity: stock, expiryDate: expiry, landingCost: cost, mrp, salesPerson, saleQty, saleRate });
+            if (stock > 0 && expiry) {
+                const d = new Date(expiry); if (!isNaN(d.getTime())) {
+                    if (!p.earliestExpiry || d < p.earliestExpiry) p.earliestExpiry = d;
+                    const s = getExpiryStatus(expiry); if (s === 'expired') p.hasExpired = true; if (s === 'expiring-soon') p.hasExpiringSoon = true;
+                }
+            }
+        }
+        allProducts = Array.from(productMap.values()).map(p => {
+            p.avgCost = p.weightedCostQty > 0 ? p.weightedCostSum / p.weightedCostQty : (p.allCosts.length > 0 ? p.allCosts.reduce((a, b) => a + b, 0) / p.allCosts.length : 0);
+            p.batches.sort((a, b) => b.quantity !== a.quantity ? b.quantity - a.quantity : (a.expiryDate || '').localeCompare(b.expiryDate || ''));
+            return p;
+        });
+        populateCompanyFilter(); populateSalesPersonFilter(); updateSummaryCards(); applyFilters();
+    }
+
+    // ====================================================================
+    //  HELPERS
+    // ====================================================================
+    function getExpiryStatus(d) { if (!d) return 'unknown'; const e = new Date(d); if (isNaN(e)) return 'unknown'; const t = new Date(); t.setHours(0,0,0,0); const diff = (e - t) / 864e5; return diff < 0 ? 'expired' : diff <= EXPIRY_WARNING_DAYS ? 'expiring-soon' : 'ok'; }
+    function getExpiryBadge(d) { const s = getExpiryStatus(d); const c = { expired:'expiry-expired','expiring-soon':'expiry-soon',ok:'expiry-ok',unknown:'expiry-unknown' }[s]; const txt = s==='expired'||s==='expiring-soon' ? fmtDate(d)+' ('+(s==='expired'?'Expired':'Soon')+')' : s==='ok' ? fmtDate(d) : 'N/A'; return '<span class="expiry-badge '+c+'">'+txt+'</span>'; }
+    function fmtDate(d) { if (!d) return 'N/A'; const dt = new Date(d); if (isNaN(dt)) return d; return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][dt.getMonth()]+' '+dt.getFullYear(); }
+    function fmtCur(n) { return (!n || n===0) ? '-' : '\u20B9'+n.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+    function stockCls(s) { return s===0?'stock-zero':s<10?'stock-low':'stock-good'; }
+    function escHtml(t) { if (!t) return ''; const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
+
+    // ====================================================================
+    //  FILTERS & SORTING
+    // ====================================================================
+    function populateCompanyFilter() { const s = new Set(); allProducts.forEach(p => { if (p.company) s.add(p.company); }); const arr = Array.from(s).sort(); const el = document.getElementById('companyFilter'); el.innerHTML = '<option value="">All Companies ('+arr.length+')</option>'; arr.forEach(c => el.innerHTML += '<option value="'+escHtml(c)+'">'+escHtml(c)+'</option>'); }
+    function populateSalesPersonFilter() { const s = new Set(SALES_TEAM); allProducts.forEach(p => p.batches.forEach(b => { if (b.salesPerson) s.add(b.salesPerson.toUpperCase()); })); const arr = Array.from(s).sort(); const el = document.getElementById('salesPersonFilter'); el.innerHTML = '<option value="">All Sales Persons</option>'; arr.forEach(sp => el.innerHTML += '<option value="'+escHtml(sp)+'">'+escHtml(sp)+'</option>'); }
+    function setStockFilter(v) { showOnlyInStock = v; document.getElementById('btnInStock').className = v ? 'active' : ''; document.getElementById('btnAll').className = v ? '' : 'active'; applyFilters(); }
+    function applyFilters() {
+        const search = document.getElementById('searchInput').value.toLowerCase().trim();
+        const company = document.getElementById('companyFilter').value;
+        const sp = document.getElementById('salesPersonFilter').value;
+        filteredProducts = allProducts.filter(p => {
+            if (showOnlyInStock && p.totalStock === 0) return false;
+            if (search && !p.name.toLowerCase().includes(search)) return false;
+            if (company && p.company !== company) return false;
+            if (sp && !p.batches.some(b => b.salesPerson && b.salesPerson.toUpperCase() === sp.toUpperCase())) return false;
+            return true;
+        });
+        applySorting(); renderTable();
+    }
+    function sortBy(field) { if (currentSort.field === field) currentSort.asc = !currentSort.asc; else { currentSort.field = field; currentSort.asc = true; } applySorting(); renderTable(); }
+    function applySorting() { const {field, asc} = currentSort; filteredProducts.sort((a, b) => { let va, vb; switch(field) { case 'name': va=a.name.toLowerCase(); vb=b.name.toLowerCase(); break; case 'company': va=(a.company||'').toLowerCase(); vb=(b.company||'').toLowerCase(); break; case 'cost': va=a.avgCost; vb=b.avgCost; break; case 'stock': va=a.totalStock; vb=b.totalStock; break; case 'expiry': va=a.earliestExpiry?a.earliestExpiry.getTime():9e12; vb=b.earliestExpiry?b.earliestExpiry.getTime():9e12; break; } return va<vb?(asc?-1:1):va>vb?(asc?1:-1):0; }); }
+
+    // ====================================================================
+    //  SUMMARY CARDS
+    // ====================================================================
+    function updateSummaryCards() {
+        const total = allProducts.length, inStock = allProducts.filter(p=>p.totalStock>0).length, units = allProducts.reduce((s,p)=>s+p.totalStock,0);
+        const expired = allProducts.filter(p=>p.totalStock>0&&p.hasExpired).length, soon = allProducts.filter(p=>p.totalStock>0&&p.hasExpiringSoon&&!p.hasExpired).length;
+        document.getElementById('totalProducts').textContent = total.toLocaleString(); document.getElementById('totalProductsSub').textContent = 'unique products';
+        document.getElementById('inStock').textContent = inStock.toLocaleString(); document.getElementById('inStockSub').textContent = units.toLocaleString()+' total units';
+        document.getElementById('expiredCount').textContent = expired; document.getElementById('expiringSoon').textContent = soon;
+    }
+
+    // ====================================================================
+    //  TABLE RENDERING
+    // ====================================================================
+    function renderTable() {
+        const tbody = document.getElementById('tableBody'); expandedProduct = null; saleDataStore = {};
+        ['name','company','cost','stock','expiry'].forEach(f => { const el = document.getElementById('sort-'+f); el.textContent = f===currentSort.field?(currentSort.asc?'\u25B2':'\u25BC'):''; });
+        document.getElementById('resultCount').textContent = 'Showing '+filteredProducts.length+' of '+allProducts.length+' products';
+        if (!filteredProducts.length) { tbody.innerHTML = '<tr><td colspan="5"><div class="no-results">No products found.</div></td></tr>'; return; }
+        let html = '';
+        filteredProducts.forEach((p, idx) => {
+            const exp = p.earliestExpiry ? getExpiryBadge(p.earliestExpiry.toISOString().split('T')[0]) : '<span class="expiry-badge expiry-unknown">N/A</span>';
+            html += '<tr class="product-row" data-idx="'+idx+'" onclick="toggleExpand('+idx+')"><td><span class="chevron">\u25B6</span>'+escHtml(p.name)+(p.kind?'<br><span class="company-tag">'+escHtml(p.kind)+'</span>':'')+'</td><td><span class="company-tag" title="'+escHtml(p.company)+'">'+escHtml(p.company)+'</span></td><td>'+fmtCur(p.avgCost)+'</td><td><span class="'+stockCls(p.totalStock)+'">'+p.totalStock.toLocaleString()+'</span></td><td>'+exp+'</td></tr>';
+            html += '<tr class="batch-row" id="batch-'+idx+'"><td colspan="5"><div class="batch-table-wrap">'+renderBatchTable(p)+'</div></td></tr>';
+        });
+        tbody.innerHTML = html;
+    }
+
+    function renderBatchTable(product) {
+        let h = '<table class="batch-table"><thead><tr><th>Batch</th><th>Qty</th><th>Expiry</th><th>L.Cost</th><th>MRP</th><th>Sold By</th><th>Sale Qty</th><th>Sale Rate</th><th></th></tr></thead><tbody>';
+        product.batches.forEach((b, i) => {
+            const key = 'sk_' + product.name.replace(/[^a-zA-Z0-9]/g,'_') + '_' + i;
+            saleDataStore[key] = { itemName: product.name, batchNo: b.batchNo, quantity: b.quantity, mrp: b.mrp, expiryDate: b.expiryDate, landingCost: b.landingCost };
+            const sp = b.salesPerson ? '<span class="sales-person-tag">'+escHtml(b.salesPerson)+'</span>' : '<span style="color:#ccc">-</span>';
+            const sq = b.saleQty > 0 ? '<span style="color:var(--primary);font-weight:600">'+b.saleQty.toLocaleString()+'</span>' : '<span style="color:#ccc">-</span>';
+            const sr = b.saleRate > 0 ? fmtCur(b.saleRate) : '<span style="color:#ccc">-</span>';
+            const btn = b.quantity > 0 ? '<button class="btn-sale" onclick="event.stopPropagation();openSaleModal(\''+key+'\')">+ Sale</button>' : '';
+            h += '<tr><td><strong>'+escHtml(b.batchNo||'-')+'</strong></td><td><span class="'+stockCls(b.quantity)+'">'+b.quantity.toLocaleString()+'</span></td><td>'+getExpiryBadge(b.expiryDate)+'</td><td>'+fmtCur(b.landingCost)+'</td><td>'+fmtCur(b.mrp)+'</td><td>'+sp+'</td><td>'+sq+'</td><td>'+sr+'</td><td>'+btn+'</td></tr>';
+        });
+        h += '</tbody></table>';
+        const tq = product.batches.reduce((s,b)=>s+b.quantity,0), ts = product.batches.reduce((s,b)=>s+b.saleQty,0), tv = product.batches.reduce((s,b)=>s+b.saleQty*b.saleRate,0);
+        h += '<div style="text-align:right;padding:6px 10px;font-size:12px;color:var(--text-light)"><strong>'+product.batches.length+'</strong> batch(es) &bull; <strong>'+tq.toLocaleString()+'</strong> units'+(ts>0?' &bull; Sold: <strong style="color:var(--primary)">'+ts.toLocaleString()+'</strong> &bull; Revenue: <strong style="color:var(--success)">'+fmtCur(tv)+'</strong>':'')+'</div>';
+        return h;
+    }
+
+    function toggleExpand(idx) {
+        const br = document.getElementById('batch-'+idx), pr = document.querySelector('.product-row[data-idx="'+idx+'"]');
+        if (expandedProduct !== null && expandedProduct !== idx) { document.getElementById('batch-'+expandedProduct).classList.remove('visible'); const prev = document.querySelector('.product-row[data-idx="'+expandedProduct+'"]'); if (prev) prev.classList.remove('expanded'); }
+        if (expandedProduct === idx) { br.classList.remove('visible'); pr.classList.remove('expanded'); expandedProduct = null; }
+        else { br.classList.add('visible'); pr.classList.add('expanded'); expandedProduct = idx; }
+    }
+
+    // ====================================================================
+    //  SALES REPORT
+    // ====================================================================
+    function renderSalesReport() {
+        const salesMap = {};
+        allProducts.forEach(p => {
+            p.batches.forEach(b => {
+                if (b.salesPerson && b.saleQty > 0) {
+                    const sp = b.salesPerson.toUpperCase();
+                    if (!salesMap[sp]) salesMap[sp] = { name: b.salesPerson, totalQty: 0, totalRevenue: 0, items: new Set(), products: [] };
+                    salesMap[sp].totalQty += b.saleQty;
+                    salesMap[sp].totalRevenue += b.saleQty * (b.saleRate || 0);
+                    salesMap[sp].items.add(p.name);
+                    salesMap[sp].products.push({ product: p.name, batch: b.batchNo, qty: b.saleQty, rate: b.saleRate, value: b.saleQty * (b.saleRate || 0) });
+                }
+            });
+        });
+
+        const sorted = Object.values(salesMap).sort((a, b) => b.totalRevenue - a.totalRevenue);
+        const maxRev = sorted.length > 0 ? sorted[0].totalRevenue : 1;
+        const grandQty = sorted.reduce((s, p) => s + p.totalQty, 0);
+        const grandRev = sorted.reduce((s, p) => s + p.totalRevenue, 0);
+
+        // Summary cards
+        let cards = '<div class="card purple"><div class="card-label">Total Sales Persons</div><div class="card-value">'+sorted.length+'</div><div class="card-sub">with recorded sales</div></div>';
+        cards += '<div class="card green"><div class="card-label">Total Qty Sold</div><div class="card-value">'+grandQty.toLocaleString()+'</div><div class="card-sub">units</div></div>';
+        cards += '<div class="card"><div class="card-label">Total Revenue</div><div class="card-value">'+fmtCur(grandRev)+'</div><div class="card-sub">from all sales</div></div>';
+        cards += '<div class="card yellow"><div class="card-label">Avg. Rate/Unit</div><div class="card-value">'+(grandQty>0?fmtCur(grandRev/grandQty):'-')+'</div><div class="card-sub">across all sales</div></div>';
+        document.getElementById('reportSummaryCards').innerHTML = cards;
+
+        // Report table
+        const tbody = document.getElementById('reportBody');
+        if (!sorted.length) { tbody.innerHTML = '<tr><td colspan="7" class="no-sales">No sales recorded yet. Use the <strong>+ Sale</strong> button in Inventory tab.</td></tr>'; document.getElementById('salesDetailSection').innerHTML = ''; return; }
+
+        let html = '';
+        sorted.forEach((sp, i) => {
+            const avg = sp.totalQty > 0 ? sp.totalRevenue / sp.totalQty : 0;
+            const pct = maxRev > 0 ? (sp.totalRevenue / maxRev * 100) : 0;
+            html += '<tr><td class="rank">'+(i+1)+'</td><td><strong>'+escHtml(sp.name)+'</strong></td><td>'+sp.items.size+'</td><td><strong>'+sp.totalQty.toLocaleString()+'</strong></td><td><strong style="color:var(--success)">'+fmtCur(sp.totalRevenue)+'</strong></td><td>'+fmtCur(avg)+'</td><td><div class="report-bar"><div class="report-bar-fill" style="width:'+pct+'%"></div></div></td></tr>';
+        });
+        tbody.innerHTML = html;
+
+        // Detailed breakdown per person
+        let detail = '';
+        sorted.forEach(sp => {
+            detail += '<div class="report-container" style="margin-bottom:12px"><div style="padding:10px 14px;background:#8e44ad;color:white;font-weight:600;font-size:14px">'+escHtml(sp.name)+' — Detail</div><table class="batch-table"><thead><tr><th>Product</th><th>Batch</th><th>Qty</th><th>Rate</th><th>Value</th></tr></thead><tbody>';
+            sp.products.forEach(pr => {
+                detail += '<tr><td>'+escHtml(pr.product)+'</td><td>'+escHtml(pr.batch)+'</td><td><strong>'+pr.qty.toLocaleString()+'</strong></td><td>'+fmtCur(pr.rate)+'</td><td><strong style="color:var(--success)">'+fmtCur(pr.value)+'</strong></td></tr>';
+            });
+            detail += '</tbody></table></div>';
+        });
+        document.getElementById('salesDetailSection').innerHTML = detail;
+    }
+
+    // ====================================================================
+    //  SALE MODAL
+    // ====================================================================
+    function openSaleModal(key) {
+        currentSaleData = saleDataStore[key];
+        if (!currentSaleData) { showToast('Error loading product data', 'error'); return; }
+        document.getElementById('modalProductInfo').textContent = currentSaleData.itemName;
+        document.getElementById('modalBatchInfo').innerHTML = '<strong>Batch:</strong> '+escHtml(currentSaleData.batchNo)+' &bull; <strong>Stock:</strong> '+currentSaleData.quantity+' &bull; <strong>MRP:</strong> '+fmtCur(currentSaleData.mrp)+' &bull; <strong>Expiry:</strong> '+fmtDate(currentSaleData.expiryDate);
+        const sel = document.getElementById('salePerson'); sel.innerHTML = '<option value="">-- Select Your Name --</option>';
+        SALES_TEAM.forEach(sp => sel.innerHTML += '<option value="'+sp+'">'+sp+'</option>');
+        document.getElementById('saleQtyInput').value = '';
+        document.getElementById('saleRateInput').value = '';
+        document.getElementById('btnSubmitSale').disabled = false;
+        document.getElementById('btnSubmitSale').textContent = 'Submit Sale';
+        document.getElementById('saleModal').classList.add('active');
+        document.getElementById('salePerson').focus();
+    }
+    function closeSaleModal() { document.getElementById('saleModal').classList.remove('active'); currentSaleData = null; }
+    document.getElementById('saleModal').addEventListener('click', function(e) { if (e.target === this) closeSaleModal(); });
+    document.addEventListener('keydown', function(e) { if (e.key === 'Escape') closeSaleModal(); });
+
+    async function submitSale() {
+        const sp = document.getElementById('salePerson').value;
+        const qty = parseInt(document.getElementById('saleQtyInput').value) || 0;
+        const rate = parseFloat(document.getElementById('saleRateInput').value) || 0;
+        if (!sp) { showToast('Select your name', 'error'); return; }
+        if (qty <= 0) { showToast('Enter valid quantity', 'error'); return; }
+        if (qty > currentSaleData.quantity) { showToast('Qty ('+qty+') exceeds stock ('+currentSaleData.quantity+')', 'error'); return; }
+        if (rate <= 0) { showToast('Enter net sale rate per unit', 'error'); return; }
+
+        const btn = document.getElementById('btnSubmitSale'); btn.disabled = true; btn.textContent = 'Submitting...';
+
+        if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.includes('PASTE_YOUR')) {
+            // Save locally when Google Apps Script is not configured
+            saveLocalSale(currentSaleData.itemName, currentSaleData.batchNo, sp, qty, rate);
+            closeSaleModal();
+            showToast(sp + ' sold ' + qty + ' x ' + fmtCur(rate) + ' of ' + currentSaleData.itemName + ' ✓ Saved locally', 'success');
+            loadData(); // Reload to show updated sale data
+            return;
+        }
+        try {
+            const url = APPS_SCRIPT_URL+'?action=recordSale&itemName='+encodeURIComponent(currentSaleData.itemName)+'&batchNo='+encodeURIComponent(currentSaleData.batchNo)+'&salesPerson='+encodeURIComponent(sp)+'&saleQty='+encodeURIComponent(qty)+'&saleRate='+encodeURIComponent(rate);
+            await fetch(url, { mode: 'no-cors' });
+            // Also save locally as backup
+            saveLocalSale(currentSaleData.itemName, currentSaleData.batchNo, sp, qty, rate);
+            closeSaleModal();
+            showToast(sp+' sold '+qty+' units @ '+fmtCur(rate)+' of '+currentSaleData.itemName, 'success');
+            setTimeout(() => loadData(), 3000);
+        } catch(err) { showToast('Error: '+err.message, 'error'); btn.disabled = false; btn.textContent = 'Submit Sale'; }
+    }
+
+    function showToast(msg, type) {
+        document.querySelectorAll('.toast').forEach(t => t.remove());
+        const t = document.createElement('div'); t.className = 'toast '+type; t.textContent = msg; document.body.appendChild(t);
+        setTimeout(() => { t.style.opacity='0'; t.style.transform='translateY(20px)'; t.style.transition='all 0.3s'; setTimeout(()=>t.remove(),300); }, 4000);
+    }
+
+    // ====================================================================
+    //  EVENT LISTENERS & INIT
+    // ====================================================================
+    document.getElementById('searchInput').addEventListener('input', function() { clearTimeout(searchTimeout); searchTimeout = setTimeout(applyFilters, 250); });
+    document.getElementById('companyFilter').addEventListener('change', applyFilters);
+    document.getElementById('salesPersonFilter').addEventListener('change', applyFilters);
+    document.addEventListener('DOMContentLoaded', loadData);
+    </script>
+</body>
+</html>

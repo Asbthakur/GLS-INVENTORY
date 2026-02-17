@@ -1,0 +1,14 @@
+# Original Excel (large file, keep private)
+INVENTORY.xls
+GLS_INVENTORY_CLEAN.xlsx
+
+# Python
+__pycache__/
+*.pyc
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Editor
+.vscode/
