@@ -200,6 +200,17 @@
                     <button id="btnAll" onclick="setStockFilter(false)">All</button>
                 </div>
             </div>
+            <!-- TOP 10 HIGH VALUE PRODUCTS -->
+            <div class="report-container" id="top10Section" style="margin-bottom:14px;">
+                <div style="padding:10px 14px;background:var(--primary);color:white;font-weight:600;font-size:14px">Top 10 High Value Products (by Stock Value at Landing Cost)</div>
+                <div class="table-scroll">
+                    <table class="batch-table" id="top10Table">
+                        <thead><tr><th>#</th><th>Product Name</th><th>Company</th><th>Stock</th><th>L.Cost (Avg)</th><th>Stock Value</th></tr></thead>
+                        <tbody id="top10Body"><tr><td colspan="6" style="text-align:center;padding:20px;color:#999">Loading...</td></tr></tbody>
+                    </table>
+                </div>
+            </div>
+
             <div class="table-container">
                 <div class="result-count" id="resultCount"></div>
                 <div class="table-scroll">
@@ -420,6 +431,12 @@
     function getExpiryBadge(d) { const s = getExpiryStatus(d); const c = { expired:'expiry-expired','expiring-soon':'expiry-soon',ok:'expiry-ok',unknown:'expiry-unknown' }[s]; const txt = s==='expired'||s==='expiring-soon' ? fmtDate(d)+' ('+(s==='expired'?'Expired':'Soon')+')' : s==='ok' ? fmtDate(d) : 'N/A'; return '<span class="expiry-badge '+c+'">'+txt+'</span>'; }
     function fmtDate(d) { if (!d) return 'N/A'; const dt = new Date(d); if (isNaN(dt)) return d; return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][dt.getMonth()]+' '+dt.getFullYear(); }
     function fmtCur(n) { return (!n || n===0) ? '-' : '\u20B9'+n.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2}); }
+    function fmtCR(n) {
+        if (!n || n === 0) return '-';
+        if (n >= 1e7) return '\u20B9' + (n/1e7).toFixed(2) + ' CR';
+        if (n >= 1e5) return '\u20B9' + (n/1e5).toFixed(2) + ' L';
+        return '\u20B9' + n.toLocaleString('en-IN',{minimumFractionDigits:0,maximumFractionDigits:0});
+    }
     function stockCls(s) { return s===0?'stock-zero':s<10?'stock-low':'stock-good'; }
     function escHtml(t) { if (!t) return ''; const d = document.createElement('div'); d.textContent = t; return d.innerHTML; }
 
@@ -459,9 +476,35 @@
 
         document.getElementById('totalProducts').textContent = total.toLocaleString(); document.getElementById('totalProductsSub').textContent = 'unique products';
         document.getElementById('inStock').textContent = inStock.toLocaleString(); document.getElementById('inStockSub').textContent = units.toLocaleString()+' total units';
-        document.getElementById('stockValue').textContent = fmtCur(remainingVal);
-        document.getElementById('stockValueSub').textContent = totalSoldAtCost > 0 ? 'Original: '+fmtCur(totalStockVal)+' | Sold: '+fmtCur(totalSoldAtCost) : 'at landing cost';
+        document.getElementById('stockValue').textContent = fmtCR(remainingVal);
+        document.getElementById('stockValueSub').textContent = totalSoldAtCost > 0 ? 'Original: '+fmtCR(totalStockVal)+' | Sold: '+fmtCR(totalSoldAtCost) : 'at landing cost';
         document.getElementById('expiredCount').textContent = expired; document.getElementById('expiringSoon').textContent = soon;
+        // Top 10 High Value Products
+        renderTop10();
+    }
+
+    // ====================================================================
+    //  TOP 10 HIGH VALUE PRODUCTS
+    // ====================================================================
+    function renderTop10() {
+        const top10 = allProducts
+            .filter(p => p.totalStock > 0 && p.totalStockValue > 0)
+            .sort((a, b) => b.totalStockValue - a.totalStockValue)
+            .slice(0, 10);
+        const tbody = document.getElementById('top10Body');
+        if (!top10.length) { tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:20px;color:#999">No in-stock products</td></tr>'; return; }
+        let html = '';
+        top10.forEach((p, i) => {
+            html += '<tr>';
+            html += '<td><strong style="color:var(--primary)">'+(i+1)+'</strong></td>';
+            html += '<td><strong>'+escHtml(p.name)+'</strong></td>';
+            html += '<td><span class="company-tag">'+escHtml(p.company)+'</span></td>';
+            html += '<td><span class="'+stockCls(p.totalStock)+'">'+p.totalStock.toLocaleString()+'</span></td>';
+            html += '<td>'+fmtCur(p.avgCost)+'</td>';
+            html += '<td><strong style="color:#8e44ad">'+fmtCR(p.totalStockValue)+'</strong></td>';
+            html += '</tr>';
+        });
+        tbody.innerHTML = html;
     }
 
     // ====================================================================
@@ -556,7 +599,7 @@
         // Summary cards
         let cards = '<div class="card purple"><div class="card-label">Total Sales Persons</div><div class="card-value">'+sorted.length+'</div><div class="card-sub">with recorded sales</div></div>';
         cards += '<div class="card green"><div class="card-label">Total Qty Sold</div><div class="card-value">'+grandQty.toLocaleString()+'</div><div class="card-sub">units</div></div>';
-        cards += '<div class="card"><div class="card-label">Total Revenue</div><div class="card-value">'+fmtCur(grandRev)+'</div><div class="card-sub">from all sales</div></div>';
+        cards += '<div class="card"><div class="card-label">Total Revenue</div><div class="card-value">'+fmtCR(grandRev)+'</div><div class="card-sub">from all sales</div></div>';
         cards += '<div class="card yellow"><div class="card-label">Avg. Rate/Unit</div><div class="card-value">'+(grandQty>0?fmtCur(grandRev/grandQty):'-')+'</div><div class="card-sub">across all sales</div></div>';
         document.getElementById('reportSummaryCards').innerHTML = cards;
 
