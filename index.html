@@ -187,6 +187,7 @@
             <div class="summary-cards" id="summaryCards" style="margin-top:14px;">
                 <div class="card"><div class="card-label">Total Products</div><div class="card-value" id="totalProducts">-</div><div class="card-sub" id="totalProductsSub"></div></div>
                 <div class="card green"><div class="card-label">In Stock</div><div class="card-value" id="inStock">-</div><div class="card-sub" id="inStockSub"></div></div>
+                <div class="card purple"><div class="card-label">Stock Value (L.Cost)</div><div class="card-value" id="stockValue">-</div><div class="card-sub" id="stockValueSub"></div></div>
                 <div class="card red"><div class="card-label">Expired</div><div class="card-value" id="expiredCount">-</div><div class="card-sub">with stock &gt; 0</div></div>
                 <div class="card yellow"><div class="card-label">Expiring Soon</div><div class="card-value" id="expiringSoon">-</div><div class="card-sub">within 90 days</div></div>
             </div>
@@ -376,19 +377,24 @@
             const kind = (row['KIND OF MEDICINE'] || '').trim();
 
             if (!productMap.has(name)) {
-                productMap.set(name, { name, kind, company, totalStock: 0, totalSaleQty: 0, totalSaleValue: 0, batches: [], weightedCostSum: 0, weightedCostQty: 0, allCosts: [], earliestExpiry: null, hasExpired: false, hasExpiringSoon: false });
+                productMap.set(name, { name, kind, company, totalStock: 0, totalSaleQty: 0, totalSaleValue: 0, totalStockValue: 0, totalSoldAtCost: 0, batches: [], weightedCostSum: 0, weightedCostQty: 0, allCosts: [], earliestExpiry: null, hasExpired: false, hasExpiringSoon: false });
             }
             const p = productMap.get(name);
             p.totalStock += stock;
+            // Stock value = current stock × landing cost
+            p.totalStockValue += stock * cost;
             if (cost > 0) { p.allCosts.push(cost); if (stock > 0) { p.weightedCostSum += cost * stock; p.weightedCostQty += stock; } }
 
             // Get individual sale records for this batch from localStorage
             const batchSales = localSales.filter(s => (s.itemName||'').trim() === name && (s.batchNo||'').trim() === batch);
             const batchTotalSaleQty = batchSales.reduce((s, r) => s + r.saleQty, 0);
             const batchTotalSaleValue = batchSales.reduce((s, r) => s + r.saleQty * r.saleRate, 0);
+            // Sold at cost = sale qty × landing cost (what we paid for the sold units)
+            const batchSoldAtCost = batchTotalSaleQty * cost;
 
             p.totalSaleQty += batchTotalSaleQty;
             p.totalSaleValue += batchTotalSaleValue;
+            p.totalSoldAtCost += batchSoldAtCost;
 
             p.batches.push({ batchNo: batch, quantity: stock, expiryDate: expiry, landingCost: cost, mrp, sales: batchSales });
 
@@ -445,8 +451,16 @@
     function updateSummaryCards() {
         const total = allProducts.length, inStock = allProducts.filter(p=>p.totalStock>0).length, units = allProducts.reduce((s,p)=>s+p.totalStock,0);
         const expired = allProducts.filter(p=>p.totalStock>0&&p.hasExpired).length, soon = allProducts.filter(p=>p.totalStock>0&&p.hasExpiringSoon&&!p.hasExpired).length;
+        // Total stock value at landing cost
+        const totalStockVal = allProducts.reduce((s,p) => s + p.totalStockValue, 0);
+        // Total sold at cost (landing cost of sold units)
+        const totalSoldAtCost = allProducts.reduce((s,p) => s + p.totalSoldAtCost, 0);
+        const remainingVal = totalStockVal - totalSoldAtCost;
+
         document.getElementById('totalProducts').textContent = total.toLocaleString(); document.getElementById('totalProductsSub').textContent = 'unique products';
         document.getElementById('inStock').textContent = inStock.toLocaleString(); document.getElementById('inStockSub').textContent = units.toLocaleString()+' total units';
+        document.getElementById('stockValue').textContent = fmtCur(remainingVal);
+        document.getElementById('stockValueSub').textContent = totalSoldAtCost > 0 ? 'Original: '+fmtCur(totalStockVal)+' | Sold: '+fmtCur(totalSoldAtCost) : 'at landing cost';
         document.getElementById('expiredCount').textContent = expired; document.getElementById('expiringSoon').textContent = soon;
     }
 
