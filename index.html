@@ -297,7 +297,7 @@
     const LOCAL_SALES_KEY = 'gls_local_sales'; // localStorage key for local sale records
 
     // ====================================================================
-    //  LOCAL SALES STORAGE (works offline / without Google Sheets)
+    //  LOCAL SALES STORAGE (per-person separate records)
     // ====================================================================
     function getLocalSales() {
         try { return JSON.parse(localStorage.getItem(LOCAL_SALES_KEY) || '[]'); } catch(e) { return []; }
@@ -307,41 +307,9 @@
         sales.push({ itemName, batchNo, salesPerson, saleQty, saleRate, timestamp: new Date().toISOString() });
         localStorage.setItem(LOCAL_SALES_KEY, JSON.stringify(sales));
     }
-    function mergeLocalSalesIntoRows(rawRows) {
-        const sales = getLocalSales();
-        if (!sales.length) return rawRows;
-        // Build a map of cumulative local sales per item+batch
-        const saleMap = {};
-        sales.forEach(s => {
-            const key = (s.itemName||'').trim() + '|||' + (s.batchNo||'').trim();
-            if (!saleMap[key]) saleMap[key] = { persons: [], totalQty: 0, totalValue: 0 };
-            saleMap[key].totalQty += s.saleQty;
-            saleMap[key].totalValue += s.saleQty * s.saleRate;
-            if (s.salesPerson && !saleMap[key].persons.includes(s.salesPerson.toUpperCase())) {
-                saleMap[key].persons.push(s.salesPerson.toUpperCase());
-            }
-        });
-        // Merge into raw rows
-        return rawRows.map(row => {
-            const key = (row['Item Name']||'').trim() + '|||' + (row['Batch No']||'').trim();
-            if (saleMap[key]) {
-                const m = saleMap[key];
-                const existingQty = parseInt(row['Sale Qty']) || 0;
-                const existingRate = parseFloat(row['Sale Rate']) || 0;
-                const existingSP = (row['Sales Person'] || '').trim();
-                const newTotalQty = existingQty + m.totalQty;
-                // Weighted average rate
-                const newRate = newTotalQty > 0 ? ((existingQty * existingRate) + m.totalValue) / newTotalQty : 0;
-                // Merge sales person names
-                let allPersons = existingSP ? [existingSP.toUpperCase()] : [];
-                m.persons.forEach(p => { if (!allPersons.includes(p)) allPersons.push(p); });
-                row = Object.assign({}, row);
-                row['Sale Qty'] = String(newTotalQty);
-                row['Sale Rate'] = String(Math.round(newRate * 100) / 100);
-                row['Sales Person'] = allPersons.join(', ');
-            }
-            return row;
-        });
+    function getLocalSalesForBatch(itemName, batchNo) {
+        // Returns array of individual sale records for a specific batch
+        return getLocalSales().filter(s => (s.itemName||'').trim() === itemName.trim() && (s.batchNo||'').trim() === batchNo.trim());
     }
 
     // ====================================================================
@@ -388,8 +356,7 @@
     //  DATA PROCESSING
     // ====================================================================
     function processData(rawRows) {
-        // Merge any locally recorded sales into the CSV data
-        rawRows = mergeLocalSalesIntoRows(rawRows);
+        const localSales = getLocalSales();
         const productMap = new Map();
         for (const row of rawRows) {
             const name = (row['Item Name'] || '').trim(); if (!name) continue;
@@ -400,19 +367,24 @@
             const batch = (row['Batch No'] || '').trim();
             const company = (row['COMPANY'] || row['Company Name'] || '').trim();
             const kind = (row['KIND OF MEDICINE'] || '').trim();
-            const salesPerson = (row['Sales Person'] || '').trim();
-            const saleQty = parseInt(row['Sale Qty']) || 0;
-            const saleRate = parseFloat(row['Sale Rate']) || 0;
 
             if (!productMap.has(name)) {
                 productMap.set(name, { name, kind, company, totalStock: 0, totalSaleQty: 0, totalSaleValue: 0, batches: [], weightedCostSum: 0, weightedCostQty: 0, allCosts: [], earliestExpiry: null, hasExpired: false, hasExpiringSoon: false });
             }
             const p = productMap.get(name);
             p.totalStock += stock;
-            p.totalSaleQty += saleQty;
-            p.totalSaleValue += saleQty * saleRate;
             if (cost > 0) { p.allCosts.push(cost); if (stock > 0) { p.weightedCostSum += cost * stock; p.weightedCostQty += stock; } }
-            p.batches.push({ batchNo: batch, quantity: stock, expiryDate: expiry, landingCost: cost, mrp, salesPerson, saleQty, saleRate });
+
+            // Get individual sale records for this batch from localStorage
+            const batchSales = localSales.filter(s => (s.itemName||'').trim() === name && (s.batchNo||'').trim() === batch);
+            const batchTotalSaleQty = batchSales.reduce((s, r) => s + r.saleQty, 0);
+            const batchTotalSaleValue = batchSales.reduce((s, r) => s + r.saleQty * r.saleRate, 0);
+
+            p.totalSaleQty += batchTotalSaleQty;
+            p.totalSaleValue += batchTotalSaleValue;
+
+            p.batches.push({ batchNo: batch, quantity: stock, expiryDate: expiry, landingCost: cost, mrp, sales: batchSales });
+
             if (stock > 0 && expiry) {
                 const d = new Date(expiry); if (!isNaN(d.getTime())) {
                     if (!p.earliestExpiry || d < p.earliestExpiry) p.earliestExpiry = d;
@@ -442,7 +414,7 @@
     //  FILTERS & SORTING
     // ====================================================================
     function populateCompanyFilter() { const s = new Set(); allProducts.forEach(p => { if (p.company) s.add(p.company); }); const arr = Array.from(s).sort(); const el = document.getElementById('companyFilter'); el.innerHTML = '<option value="">All Companies ('+arr.length+')</option>'; arr.forEach(c => el.innerHTML += '<option value="'+escHtml(c)+'">'+escHtml(c)+'</option>'); }
-    function populateSalesPersonFilter() { const s = new Set(SALES_TEAM); allProducts.forEach(p => p.batches.forEach(b => { if (b.salesPerson) s.add(b.salesPerson.toUpperCase()); })); const arr = Array.from(s).sort(); const el = document.getElementById('salesPersonFilter'); el.innerHTML = '<option value="">All Sales Persons</option>'; arr.forEach(sp => el.innerHTML += '<option value="'+escHtml(sp)+'">'+escHtml(sp)+'</option>'); }
+    function populateSalesPersonFilter() { const s = new Set(SALES_TEAM); allProducts.forEach(p => p.batches.forEach(b => { b.sales.forEach(sl => { if (sl.salesPerson) s.add(sl.salesPerson.toUpperCase()); }); })); const arr = Array.from(s).sort(); const el = document.getElementById('salesPersonFilter'); el.innerHTML = '<option value="">All Sales Persons</option>'; arr.forEach(sp => el.innerHTML += '<option value="'+escHtml(sp)+'">'+escHtml(sp)+'</option>'); }
     function setStockFilter(v) { showOnlyInStock = v; document.getElementById('btnInStock').className = v ? 'active' : ''; document.getElementById('btnAll').className = v ? '' : 'active'; applyFilters(); }
     function applyFilters() {
         const search = document.getElementById('searchInput').value.toLowerCase().trim();
@@ -452,7 +424,7 @@
             if (showOnlyInStock && p.totalStock === 0) return false;
             if (search && !p.name.toLowerCase().includes(search)) return false;
             if (company && p.company !== company) return false;
-            if (sp && !p.batches.some(b => b.salesPerson && b.salesPerson.toUpperCase() === sp.toUpperCase())) return false;
+            if (sp && !p.batches.some(b => b.sales.some(sl => sl.salesPerson && sl.salesPerson.toUpperCase() === sp.toUpperCase()))) return false;
             return true;
         });
         applySorting(); renderTable();
@@ -489,19 +461,39 @@
     }
 
     function renderBatchTable(product) {
-        let h = '<table class="batch-table"><thead><tr><th>Batch</th><th>Qty</th><th>Expiry</th><th>L.Cost</th><th>MRP</th><th>Sold By</th><th>Sale Qty</th><th>Sale Rate</th><th></th></tr></thead><tbody>';
+        let h = '<table class="batch-table"><thead><tr><th>Batch</th><th>Stock</th><th>Expiry</th><th>L.Cost</th><th>MRP</th><th>Sold By</th><th>Sale Qty</th><th>Sale Rate</th><th>Value</th><th></th></tr></thead><tbody>';
+        let grandSaleQty = 0, grandSaleValue = 0;
         product.batches.forEach((b, i) => {
             const key = 'sk_' + product.name.replace(/[^a-zA-Z0-9]/g,'_') + '_' + i;
             saleDataStore[key] = { itemName: product.name, batchNo: b.batchNo, quantity: b.quantity, mrp: b.mrp, expiryDate: b.expiryDate, landingCost: b.landingCost };
-            const sp = b.salesPerson ? '<span class="sales-person-tag">'+escHtml(b.salesPerson)+'</span>' : '<span style="color:#ccc">-</span>';
-            const sq = b.saleQty > 0 ? '<span style="color:var(--primary);font-weight:600">'+b.saleQty.toLocaleString()+'</span>' : '<span style="color:#ccc">-</span>';
-            const sr = b.saleRate > 0 ? fmtCur(b.saleRate) : '<span style="color:#ccc">-</span>';
             const btn = b.quantity > 0 ? '<button class="btn-sale" onclick="event.stopPropagation();openSaleModal(\''+key+'\')">+ Sale</button>' : '';
-            h += '<tr><td><strong>'+escHtml(b.batchNo||'-')+'</strong></td><td><span class="'+stockCls(b.quantity)+'">'+b.quantity.toLocaleString()+'</span></td><td>'+getExpiryBadge(b.expiryDate)+'</td><td>'+fmtCur(b.landingCost)+'</td><td>'+fmtCur(b.mrp)+'</td><td>'+sp+'</td><td>'+sq+'</td><td>'+sr+'</td><td>'+btn+'</td></tr>';
+            const batchSaleQty = b.sales.reduce((s,r) => s + r.saleQty, 0);
+            const batchSaleVal = b.sales.reduce((s,r) => s + r.saleQty * r.saleRate, 0);
+            grandSaleQty += batchSaleQty; grandSaleValue += batchSaleVal;
+
+            // Batch header row
+            h += '<tr style="background:#f0f4fa"><td><strong>'+escHtml(b.batchNo||'-')+'</strong></td><td><span class="'+stockCls(b.quantity)+'">'+b.quantity.toLocaleString()+'</span></td><td>'+getExpiryBadge(b.expiryDate)+'</td><td>'+fmtCur(b.landingCost)+'</td><td>'+fmtCur(b.mrp)+'</td>';
+            if (b.sales.length === 0) {
+                h += '<td><span style="color:#ccc">-</span></td><td><span style="color:#ccc">-</span></td><td><span style="color:#ccc">-</span></td><td><span style="color:#ccc">-</span></td>';
+            } else {
+                h += '<td colspan="4" style="font-size:12px;color:var(--text-light)"><strong>'+b.sales.length+'</strong> sale(s) &bull; <strong>'+batchSaleQty+'</strong> qty &bull; '+fmtCur(batchSaleVal)+'</td>';
+            }
+            h += '<td>'+btn+'</td></tr>';
+
+            // Individual sale rows per person
+            b.sales.forEach(sl => {
+                const val = sl.saleQty * sl.saleRate;
+                h += '<tr><td></td><td></td><td></td><td></td><td></td>';
+                h += '<td><span class="sales-person-tag">'+escHtml(sl.salesPerson)+'</span></td>';
+                h += '<td><strong style="color:var(--primary)">'+sl.saleQty.toLocaleString()+'</strong></td>';
+                h += '<td>'+fmtCur(sl.saleRate)+'</td>';
+                h += '<td><strong style="color:var(--success)">'+fmtCur(val)+'</strong></td>';
+                h += '<td></td></tr>';
+            });
         });
         h += '</tbody></table>';
-        const tq = product.batches.reduce((s,b)=>s+b.quantity,0), ts = product.batches.reduce((s,b)=>s+b.saleQty,0), tv = product.batches.reduce((s,b)=>s+b.saleQty*b.saleRate,0);
-        h += '<div style="text-align:right;padding:6px 10px;font-size:12px;color:var(--text-light)"><strong>'+product.batches.length+'</strong> batch(es) &bull; <strong>'+tq.toLocaleString()+'</strong> units'+(ts>0?' &bull; Sold: <strong style="color:var(--primary)">'+ts.toLocaleString()+'</strong> &bull; Revenue: <strong style="color:var(--success)">'+fmtCur(tv)+'</strong>':'')+'</div>';
+        const tq = product.batches.reduce((s,b)=>s+b.quantity,0);
+        h += '<div style="text-align:right;padding:6px 10px;font-size:12px;color:var(--text-light)"><strong>'+product.batches.length+'</strong> batch(es) &bull; <strong>'+tq.toLocaleString()+'</strong> units'+(grandSaleQty>0?' &bull; Sold: <strong style="color:var(--primary)">'+grandSaleQty.toLocaleString()+'</strong> &bull; Revenue: <strong style="color:var(--success)">'+fmtCur(grandSaleValue)+'</strong>':'')+'</div>';
         return h;
     }
 
@@ -516,17 +508,20 @@
     //  SALES REPORT
     // ====================================================================
     function renderSalesReport() {
+        // Build per-person data from individual sale records
         const salesMap = {};
         allProducts.forEach(p => {
             p.batches.forEach(b => {
-                if (b.salesPerson && b.saleQty > 0) {
-                    const sp = b.salesPerson.toUpperCase();
-                    if (!salesMap[sp]) salesMap[sp] = { name: b.salesPerson, totalQty: 0, totalRevenue: 0, items: new Set(), products: [] };
-                    salesMap[sp].totalQty += b.saleQty;
-                    salesMap[sp].totalRevenue += b.saleQty * (b.saleRate || 0);
+                b.sales.forEach(sl => {
+                    if (!sl.salesPerson || sl.saleQty <= 0) return;
+                    const sp = sl.salesPerson.toUpperCase();
+                    if (!salesMap[sp]) salesMap[sp] = { name: sl.salesPerson, totalQty: 0, totalRevenue: 0, items: new Set(), products: [] };
+                    const val = sl.saleQty * sl.saleRate;
+                    salesMap[sp].totalQty += sl.saleQty;
+                    salesMap[sp].totalRevenue += val;
                     salesMap[sp].items.add(p.name);
-                    salesMap[sp].products.push({ product: p.name, batch: b.batchNo, qty: b.saleQty, rate: b.saleRate, value: b.saleQty * (b.saleRate || 0) });
-                }
+                    salesMap[sp].products.push({ product: p.name, batch: b.batchNo, qty: sl.saleQty, rate: sl.saleRate, value: val, date: sl.timestamp ? new Date(sl.timestamp).toLocaleDateString('en-IN') : '-' });
+                });
             });
         });
 
@@ -542,7 +537,7 @@
         cards += '<div class="card yellow"><div class="card-label">Avg. Rate/Unit</div><div class="card-value">'+(grandQty>0?fmtCur(grandRev/grandQty):'-')+'</div><div class="card-sub">across all sales</div></div>';
         document.getElementById('reportSummaryCards').innerHTML = cards;
 
-        // Report table
+        // Report table (leaderboard)
         const tbody = document.getElementById('reportBody');
         if (!sorted.length) { tbody.innerHTML = '<tr><td colspan="7" class="no-sales">No sales recorded yet. Use the <strong>+ Sale</strong> button in Inventory tab.</td></tr>'; document.getElementById('salesDetailSection').innerHTML = ''; return; }
 
@@ -554,12 +549,14 @@
         });
         tbody.innerHTML = html;
 
-        // Detailed breakdown per person
+        // Detailed breakdown per person — each sale entry as separate row
         let detail = '';
         sorted.forEach(sp => {
-            detail += '<div class="report-container" style="margin-bottom:12px"><div style="padding:10px 14px;background:#8e44ad;color:white;font-weight:600;font-size:14px">'+escHtml(sp.name)+' — Detail</div><table class="batch-table"><thead><tr><th>Product</th><th>Batch</th><th>Qty</th><th>Rate</th><th>Value</th></tr></thead><tbody>';
+            const personTotal = sp.totalRevenue;
+            detail += '<div class="report-container" style="margin-bottom:12px"><div style="padding:10px 14px;background:#8e44ad;color:white;font-weight:600;font-size:14px;display:flex;justify-content:space-between">'+escHtml(sp.name)+' — Detail<span>Total: '+fmtCur(personTotal)+' ('+sp.totalQty+' units)</span></div>';
+            detail += '<table class="batch-table"><thead><tr><th>Date</th><th>Product</th><th>Batch</th><th>Qty</th><th>Rate/Unit</th><th>Value</th></tr></thead><tbody>';
             sp.products.forEach(pr => {
-                detail += '<tr><td>'+escHtml(pr.product)+'</td><td>'+escHtml(pr.batch)+'</td><td><strong>'+pr.qty.toLocaleString()+'</strong></td><td>'+fmtCur(pr.rate)+'</td><td><strong style="color:var(--success)">'+fmtCur(pr.value)+'</strong></td></tr>';
+                detail += '<tr><td>'+escHtml(pr.date)+'</td><td>'+escHtml(pr.product)+'</td><td>'+escHtml(pr.batch)+'</td><td><strong>'+pr.qty.toLocaleString()+'</strong></td><td>'+fmtCur(pr.rate)+'</td><td><strong style="color:var(--success)">'+fmtCur(pr.value)+'</strong></td></tr>';
             });
             detail += '</tbody></table></div>';
         });
