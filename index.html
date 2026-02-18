@@ -420,7 +420,7 @@
             p.avgCost = p.weightedCostQty > 0 ? p.weightedCostSum / p.weightedCostQty : (p.allCosts.length > 0 ? p.allCosts.reduce((a, b) => a + b, 0) / p.allCosts.length : 0);
             p.batches.sort((a, b) => b.quantity !== a.quantity ? b.quantity - a.quantity : (a.expiryDate || '').localeCompare(b.expiryDate || ''));
             return p;
-        });
+        }).filter(p => p.totalStockValue > 0); // Remove products with zero stock value
         populateCompanyFilter(); populateSalesPersonFilter(); updateSummaryCards(); applyFilters();
     }
 
