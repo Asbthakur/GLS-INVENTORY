@@ -265,6 +265,10 @@
                         <input type="number" id="saleRateInput" min="0" step="0.01" placeholder="Rate per unit">
                     </div>
                 </div>
+                <div class="form-group">
+                    <label>Remark (optional)</label>
+                    <input type="text" id="saleRemarkInput" placeholder="e.g. Cash sale, Return, Discount etc.">
+                </div>
             </div>
             <div class="modal-actions">
                 <button class="btn-cancel" onclick="closeSaleModal()">Cancel</button>
@@ -281,7 +285,8 @@
     const APPS_SCRIPT_URL = 'PASTE_YOUR_APPS_SCRIPT_URL_HERE';
     const EXPIRY_WARNING_DAYS = 90;
     const CACHE_KEY = 'gls_inventory_cache';
-    const SALES_TEAM = ['SURAJ','ROHAN','GAURI','DIPALI','NISHA','ASHWINI','ARVIND','SUMANTH','PANKAJ','PAWAN'];
+    const SALES_TEAM = ['SURAJ','ROHAN','GAURI','DIPALI','NISHA','ASHWINI','ARVIND','SUMANTH','PANKAJ','PAWAN','HEMANTH','SWAPNAHALI','PRAJAKTA','VITHAL','RAVI SIR'];
+    const EXCLUDED_COMPANIES = ['AMARI TRADE ALLIANCE LLP.'];
 
     // ====================================================================
     //  STATE
@@ -302,9 +307,9 @@
     function getLocalSales() {
         try { return JSON.parse(localStorage.getItem(LOCAL_SALES_KEY) || '[]'); } catch(e) { return []; }
     }
-    function saveLocalSale(itemName, batchNo, salesPerson, saleQty, saleRate) {
+    function saveLocalSale(itemName, batchNo, salesPerson, saleQty, saleRate, remark) {
         const sales = getLocalSales();
-        sales.push({ itemName, batchNo, salesPerson, saleQty, saleRate, timestamp: new Date().toISOString() });
+        sales.push({ itemName, batchNo, salesPerson, saleQty, saleRate, remark: remark || '', timestamp: new Date().toISOString() });
         localStorage.setItem(LOCAL_SALES_KEY, JSON.stringify(sales));
     }
     function getLocalSalesForBatch(itemName, batchNo) {
@@ -360,12 +365,14 @@
         const productMap = new Map();
         for (const row of rawRows) {
             const name = (row['Item Name'] || '').trim(); if (!name) continue;
+            const company = (row['COMPANY'] || row['Company Name'] || '').trim();
+            // Skip excluded companies
+            if (EXCLUDED_COMPANIES.some(ex => company.toUpperCase() === ex.toUpperCase())) continue;
             const stock = parseInt(row['Current Stock']) || 0;
             const cost = parseFloat(row['Landing Cost']) || 0;
             const mrp = parseFloat(row['MRP']) || 0;
             const expiry = (row['Expiry Date'] || '').trim();
             const batch = (row['Batch No'] || '').trim();
-            const company = (row['COMPANY'] || row['Company Name'] || '').trim();
             const kind = (row['KIND OF MEDICINE'] || '').trim();
 
             if (!productMap.has(name)) {
@@ -461,7 +468,7 @@
     }
 
     function renderBatchTable(product) {
-        let h = '<table class="batch-table"><thead><tr><th>Batch</th><th>Stock</th><th>Expiry</th><th>L.Cost</th><th>MRP</th><th>Sold By</th><th>Sale Qty</th><th>Sale Rate</th><th>Value</th><th></th></tr></thead><tbody>';
+        let h = '<table class="batch-table"><thead><tr><th>Batch</th><th>Stock</th><th>Expiry</th><th>L.Cost</th><th>MRP</th><th>Sold By</th><th>Sale Qty</th><th>Sale Rate</th><th>Value</th><th>Remark</th><th></th></tr></thead><tbody>';
         let grandSaleQty = 0, grandSaleValue = 0;
         product.batches.forEach((b, i) => {
             const key = 'sk_' + product.name.replace(/[^a-zA-Z0-9]/g,'_') + '_' + i;
@@ -474,20 +481,22 @@
             // Batch header row
             h += '<tr style="background:#f0f4fa"><td><strong>'+escHtml(b.batchNo||'-')+'</strong></td><td><span class="'+stockCls(b.quantity)+'">'+b.quantity.toLocaleString()+'</span></td><td>'+getExpiryBadge(b.expiryDate)+'</td><td>'+fmtCur(b.landingCost)+'</td><td>'+fmtCur(b.mrp)+'</td>';
             if (b.sales.length === 0) {
-                h += '<td><span style="color:#ccc">-</span></td><td><span style="color:#ccc">-</span></td><td><span style="color:#ccc">-</span></td><td><span style="color:#ccc">-</span></td>';
+                h += '<td><span style="color:#ccc">-</span></td><td><span style="color:#ccc">-</span></td><td><span style="color:#ccc">-</span></td><td><span style="color:#ccc">-</span></td><td><span style="color:#ccc">-</span></td>';
             } else {
-                h += '<td colspan="4" style="font-size:12px;color:var(--text-light)"><strong>'+b.sales.length+'</strong> sale(s) &bull; <strong>'+batchSaleQty+'</strong> qty &bull; '+fmtCur(batchSaleVal)+'</td>';
+                h += '<td colspan="5" style="font-size:12px;color:var(--text-light)"><strong>'+b.sales.length+'</strong> sale(s) &bull; <strong>'+batchSaleQty+'</strong> qty &bull; '+fmtCur(batchSaleVal)+'</td>';
             }
             h += '<td>'+btn+'</td></tr>';
 
             // Individual sale rows per person
             b.sales.forEach(sl => {
                 const val = sl.saleQty * sl.saleRate;
+                const rmk = sl.remark ? '<span style="color:#8e44ad;font-size:12px">'+escHtml(sl.remark)+'</span>' : '<span style="color:#ccc">-</span>';
                 h += '<tr><td></td><td></td><td></td><td></td><td></td>';
                 h += '<td><span class="sales-person-tag">'+escHtml(sl.salesPerson)+'</span></td>';
                 h += '<td><strong style="color:var(--primary)">'+sl.saleQty.toLocaleString()+'</strong></td>';
                 h += '<td>'+fmtCur(sl.saleRate)+'</td>';
                 h += '<td><strong style="color:var(--success)">'+fmtCur(val)+'</strong></td>';
+                h += '<td>'+rmk+'</td>';
                 h += '<td></td></tr>';
             });
         });
@@ -520,7 +529,7 @@
                     salesMap[sp].totalQty += sl.saleQty;
                     salesMap[sp].totalRevenue += val;
                     salesMap[sp].items.add(p.name);
-                    salesMap[sp].products.push({ product: p.name, batch: b.batchNo, qty: sl.saleQty, rate: sl.saleRate, value: val, date: sl.timestamp ? new Date(sl.timestamp).toLocaleDateString('en-IN') : '-' });
+                    salesMap[sp].products.push({ product: p.name, batch: b.batchNo, qty: sl.saleQty, rate: sl.saleRate, value: val, date: sl.timestamp ? new Date(sl.timestamp).toLocaleDateString('en-IN') : '-', remark: sl.remark || '' });
                 });
             });
         });
@@ -554,9 +563,10 @@
         sorted.forEach(sp => {
             const personTotal = sp.totalRevenue;
             detail += '<div class="report-container" style="margin-bottom:12px"><div style="padding:10px 14px;background:#8e44ad;color:white;font-weight:600;font-size:14px;display:flex;justify-content:space-between">'+escHtml(sp.name)+' — Detail<span>Total: '+fmtCur(personTotal)+' ('+sp.totalQty+' units)</span></div>';
-            detail += '<table class="batch-table"><thead><tr><th>Date</th><th>Product</th><th>Batch</th><th>Qty</th><th>Rate/Unit</th><th>Value</th></tr></thead><tbody>';
+            detail += '<table class="batch-table"><thead><tr><th>Date</th><th>Product</th><th>Batch</th><th>Qty</th><th>Rate/Unit</th><th>Value</th><th>Remark</th></tr></thead><tbody>';
             sp.products.forEach(pr => {
-                detail += '<tr><td>'+escHtml(pr.date)+'</td><td>'+escHtml(pr.product)+'</td><td>'+escHtml(pr.batch)+'</td><td><strong>'+pr.qty.toLocaleString()+'</strong></td><td>'+fmtCur(pr.rate)+'</td><td><strong style="color:var(--success)">'+fmtCur(pr.value)+'</strong></td></tr>';
+                const rmk = pr.remark ? '<span style="color:#8e44ad">'+escHtml(pr.remark)+'</span>' : '-';
+                detail += '<tr><td>'+escHtml(pr.date)+'</td><td>'+escHtml(pr.product)+'</td><td>'+escHtml(pr.batch)+'</td><td><strong>'+pr.qty.toLocaleString()+'</strong></td><td>'+fmtCur(pr.rate)+'</td><td><strong style="color:var(--success)">'+fmtCur(pr.value)+'</strong></td><td>'+rmk+'</td></tr>';
             });
             detail += '</tbody></table></div>';
         });
@@ -575,6 +585,7 @@
         SALES_TEAM.forEach(sp => sel.innerHTML += '<option value="'+sp+'">'+sp+'</option>');
         document.getElementById('saleQtyInput').value = '';
         document.getElementById('saleRateInput').value = '';
+        document.getElementById('saleRemarkInput').value = '';
         document.getElementById('btnSubmitSale').disabled = false;
         document.getElementById('btnSubmitSale').textContent = 'Submit Sale';
         document.getElementById('saleModal').classList.add('active');
@@ -588,6 +599,7 @@
         const sp = document.getElementById('salePerson').value;
         const qty = parseInt(document.getElementById('saleQtyInput').value) || 0;
         const rate = parseFloat(document.getElementById('saleRateInput').value) || 0;
+        const remark = document.getElementById('saleRemarkInput').value.trim();
         if (!sp) { showToast('Select your name', 'error'); return; }
         if (qty <= 0) { showToast('Enter valid quantity', 'error'); return; }
         if (qty > currentSaleData.quantity) { showToast('Qty ('+qty+') exceeds stock ('+currentSaleData.quantity+')', 'error'); return; }
@@ -597,17 +609,17 @@
 
         if (!APPS_SCRIPT_URL || APPS_SCRIPT_URL.includes('PASTE_YOUR')) {
             // Save locally when Google Apps Script is not configured
-            saveLocalSale(currentSaleData.itemName, currentSaleData.batchNo, sp, qty, rate);
+            saveLocalSale(currentSaleData.itemName, currentSaleData.batchNo, sp, qty, rate, remark);
             closeSaleModal();
             showToast(sp + ' sold ' + qty + ' x ' + fmtCur(rate) + ' of ' + currentSaleData.itemName + ' ✓ Saved locally', 'success');
             loadData(); // Reload to show updated sale data
             return;
         }
         try {
-            const url = APPS_SCRIPT_URL+'?action=recordSale&itemName='+encodeURIComponent(currentSaleData.itemName)+'&batchNo='+encodeURIComponent(currentSaleData.batchNo)+'&salesPerson='+encodeURIComponent(sp)+'&saleQty='+encodeURIComponent(qty)+'&saleRate='+encodeURIComponent(rate);
+            const url = APPS_SCRIPT_URL+'?action=recordSale&itemName='+encodeURIComponent(currentSaleData.itemName)+'&batchNo='+encodeURIComponent(currentSaleData.batchNo)+'&salesPerson='+encodeURIComponent(sp)+'&saleQty='+encodeURIComponent(qty)+'&saleRate='+encodeURIComponent(rate)+'&remark='+encodeURIComponent(remark);
             await fetch(url, { mode: 'no-cors' });
             // Also save locally as backup
-            saveLocalSale(currentSaleData.itemName, currentSaleData.batchNo, sp, qty, rate);
+            saveLocalSale(currentSaleData.itemName, currentSaleData.batchNo, sp, qty, rate, remark);
             closeSaleModal();
             showToast(sp+' sold '+qty+' units @ '+fmtCur(rate)+' of '+currentSaleData.itemName, 'success');
             setTimeout(() => loadData(), 3000);
